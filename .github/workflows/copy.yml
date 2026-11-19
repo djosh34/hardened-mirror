@@ -1,0 +1,65 @@
+name: copy
+
+# Copies one image of dhi.io by tag to ghcr.io/<owner>/<repo>, under the same
+# tag, when started by hand. It is for a build the nightly mirror does not
+# keep, such as an older patch release: the nightly mirror leaves a tag alone
+# unless it shares the digest of an entry of manifest.json. It prints the
+# image's tags on dhi.io first, so a wrong tag shows what there is.
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: An image of dhi.io by tag, such as postgres:18.6-debian13
+        required: true
+        type: string
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  copy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Install regctl
+        run: |
+          curl -fsSL -o regctl https://github.com/regclient/regclient/releases/download/v0.11.7/regctl-linux-amd64
+          echo "3737fbbdd791e04e7a831640b681f3397a376498e80e2ad9b1b2d27296f239bc  regctl" | sha256sum -c
+          sudo install -m 755 regctl /usr/local/bin/regctl
+          rm regctl
+      - name: Log in to dhi.io and ghcr.io
+        env:
+          DHI_USERNAME: ${{ secrets.DHI_USERNAME }}
+          DHI_TOKEN: ${{ secrets.DHI_TOKEN }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          docker login dhi.io --username "$DHI_USERNAME" --password-stdin <<<"$DHI_TOKEN"
+          docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin <<<"$GHCR_TOKEN"
+      - name: Copy
+        env:
+          IMAGE: ${{ inputs.image }}
+        run: |
+          set -euo pipefail
+          if [[ ! $IMAGE =~ ^[a-z0-9][a-z0-9._/-]*:[A-Za-z0-9_][A-Za-z0-9._-]*$ ]]; then
+            echo "not an image by tag: $IMAGE" >&2
+            exit 1
+          fi
+          repo=${IMAGE%:*}
+          tag=${IMAGE##*:}
+          tags=$(regctl tag ls "dhi.io/$repo")
+          echo "Tags of dhi.io/$repo:"
+          grep -v '^sha256-' <<<"$tags" || true
+          digest=$(regctl manifest head "dhi.io/$IMAGE")
+          dest="ghcr.io/$GITHUB_REPOSITORY/${repo##*/}:$tag"
+          # --referrers and --digest-tags bring its signatures and
+          # attestations, as in the nightly mirror.
+          regctl image copy --referrers --digest-tags "dhi.io/$repo@$digest" "$dest"
+          echo "$dest is $digest" | tee -a "$GITHUB_STEP_SUMMARY"
