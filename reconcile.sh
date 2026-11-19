@@ -17,12 +17,13 @@ entries=$(jq -ec --arg key "$key" '.[$key][]' mirror.json)
 releases=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[].tag_name')
 
 # Prints the digest of a GHCR tag, or nothing when the tag does not exist.
+errors=$(mktemp)
 ghcr_digest() {
-  local out
-  if out=$(regctl manifest head "$dest:$1" 2>&1); then
-    echo "$out"
-  elif [[ $out != *"[http 404]"* ]]; then
-    echo "$out" >&2
+  local digest
+  if digest=$(regctl manifest head "$dest:$1" 2>"$errors"); then
+    echo "$digest"
+  elif ! grep -qF "[http 404]" "$errors"; then
+    cat "$errors" >&2
     return 1
   fi
 }
