@@ -13,6 +13,13 @@ image=${key%%:*}
 prefix=${key#*:}
 dest="ghcr.io/$GITHUB_REPOSITORY/$image"
 
+# A rerun of an old job can name a key that main no longer tracks.
+tracked=$(jq --arg key "$key" 'any(.[]; "\(.image):\(.prefix)" == $key)' manifest.json)
+if [[ $tracked != true ]]; then
+  echo "$key is not in manifest.json; dispatch a new run instead" >&2
+  exit 1
+fi
+
 entries=$(jq -ec --arg key "$key" '.[$key][]' mirror.json)
 releases=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[].tag_name')
 
