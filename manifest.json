@@ -1,0 +1,3 @@
+[
+  { "image": "postgres", "dhi_tag": "18-debian", "prefix": "18-debian" }
+]
