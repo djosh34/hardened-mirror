@@ -1,0 +1,102 @@
+name: mirror
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+# Runs one at a time, so no two runs write mirror.json or GHCR at once.
+concurrency:
+  group: mirror
+  cancel-in-progress: false
+
+env:
+  REGCTL_URL: https://github.com/regclient/regclient/releases/download/v0.11.7/regctl-linux-amd64
+  REGCTL_SHA256: 3737fbbdd791e04e7a831640b681f3397a376498e80e2ad9b1b2d27296f239bc
+  COSIGN_URL: https://github.com/sigstore/cosign/releases/download/v3.1.4/cosign-linux-amd64
+  COSIGN_SHA256: 424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa
+
+jobs:
+  update:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      keys: ${{ steps.commit.outputs.keys }}
+    steps:
+      # main as it is now, not the commit the run was queued for.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+      - name: Install regctl
+        run: |
+          curl -fsSL -o regctl "$REGCTL_URL"
+          echo "$REGCTL_SHA256  regctl" | sha256sum -c
+          sudo install -m 755 regctl /usr/local/bin/regctl
+          rm regctl
+      - name: Log in to dhi.io
+        env:
+          DHI_USERNAME: ${{ secrets.DHI_USERNAME }}
+          DHI_TOKEN: ${{ secrets.DHI_TOKEN }}
+        run: docker login dhi.io --username "$DHI_USERNAME" --password-stdin <<<"$DHI_TOKEN"
+      - name: Update mirror.json
+        run: ./update.sh | tee added.txt
+      - name: Commit mirror.json
+        id: commit
+        run: |
+          if [[ -s added.txt ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "Add $(paste -sd ' ' added.txt)" mirror.json
+            git push origin HEAD:main
+          fi
+          keys=$(jq -c '[.[] | "\(.image):\(.prefix)"]' manifest.json)
+          echo "keys=$keys" >>"$GITHUB_OUTPUT"
+
+  reconcile:
+    needs: update
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        key: ${{ fromJSON(needs.update.outputs.keys) }}
+    steps:
+      # main as it is now, so a rerun of an older job never moves latest back.
+      # Full history to find the commit that added each entry.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Install regctl and cosign
+        run: |
+          curl -fsSL -o regctl "$REGCTL_URL"
+          echo "$REGCTL_SHA256  regctl" | sha256sum -c
+          curl -fsSL -o cosign "$COSIGN_URL"
+          echo "$COSIGN_SHA256  cosign" | sha256sum -c
+          sudo install -m 755 regctl cosign /usr/local/bin/
+          rm regctl cosign
+      - name: Log in to dhi.io and ghcr.io
+        env:
+          DHI_USERNAME: ${{ secrets.DHI_USERNAME }}
+          DHI_TOKEN: ${{ secrets.DHI_TOKEN }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          docker login dhi.io --username "$DHI_USERNAME" --password-stdin <<<"$DHI_TOKEN"
+          docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin <<<"$GHCR_TOKEN"
+      - name: Reconcile ${{ matrix.key }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEY: ${{ matrix.key }}
+        run: ./reconcile.sh "$KEY"
