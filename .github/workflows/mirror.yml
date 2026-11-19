@@ -50,12 +50,13 @@ jobs:
           set -euo pipefail
           errors=$(mktemp)
 
-          # Prints the digest of $1, or nothing when the tag does not exist.
+          # Prints the digest of $1, or nothing when the tag does not exist or
+          # dhi.io refuses it to this account (FIPS tags need an entitlement).
           digest_or_empty() {
             if regctl manifest head "$1" 2>"$errors"; then
               return
             fi
-            if ! grep -qF "[http 404]" "$errors"; then
+            if ! grep -qE "\[http 404\]|No entitlement for" "$errors"; then
               cat "$errors" >&2
               return 1
             fi
@@ -83,7 +84,7 @@ jobs:
             echo "$entry is $digest"
             tags=$(regctl tag ls "$repo")
             for tag in $tags; do
-              tag_digest=$(regctl manifest head "$repo:$tag")
+              tag_digest=$(digest_or_empty "$repo:$tag")
               if [[ $tag_digest == "$digest" ]]; then
                 push "$repo" "$tag" "$digest"
               fi
