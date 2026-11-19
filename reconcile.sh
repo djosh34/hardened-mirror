@@ -16,8 +16,9 @@ dest="ghcr.io/$GITHUB_REPOSITORY/$image"
 entries=$(jq -ec --arg key "$key" '.[$key][]' mirror.json)
 releases=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[].tag_name')
 
-# Prints the digest of a GHCR tag, or nothing when the tag does not exist.
 errors=$(mktemp)
+
+# Prints the digest of a GHCR tag, or nothing when the tag does not exist.
 ghcr_digest() {
   local digest
   if digest=$(regctl manifest head "$dest:$1" 2>"$errors"); then
