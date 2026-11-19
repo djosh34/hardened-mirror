@@ -30,7 +30,6 @@ jobs:
     permissions:
       contents: write
     outputs:
-      sha: ${{ steps.commit.outputs.sha }}
       keys: ${{ steps.commit.outputs.keys }}
     steps:
       # main as it is now, not the commit the run was queued for.
@@ -59,8 +58,8 @@ jobs:
             git commit -m "Add $(paste -sd ' ' added.txt)" mirror.json
             git push origin HEAD:main
           fi
-          echo "sha=$(git rev-parse HEAD)" >>"$GITHUB_OUTPUT"
-          echo "keys=$(jq -c '[.[] | "\(.image):\(.prefix)"]' manifest.json)" >>"$GITHUB_OUTPUT"
+          keys=$(jq -c '[.[] | "\(.image):\(.prefix)"]' manifest.json)
+          echo "keys=$keys" >>"$GITHUB_OUTPUT"
 
   reconcile:
     needs: update
@@ -74,10 +73,11 @@ jobs:
       matrix:
         key: ${{ fromJSON(needs.update.outputs.keys) }}
     steps:
-      # The commit update made, with full history to find the commit of each entry.
+      # main as it is now, so a rerun of an older job never moves latest back.
+      # Full history to find the commit that added each entry.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.update.outputs.sha }}
+          ref: main
           fetch-depth: 0
       - name: Install regctl and cosign
         run: |

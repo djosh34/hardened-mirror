@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Makes GHCR and the releases match mirror.json for one <image>:<prefix> key.
-# Copies each entry whose tag or release is missing, with its referrers, checks
-# the copied signature, then makes the release. Points <prefix>-latest at the
-# last entry. A dated tag is never moved.
+# Copies each entry whose tag is missing, with its referrers. For each entry
+# without a release, checks the DHI signature on the copy, then makes the
+# release. Points <prefix>-latest at the last entry. A dated tag is never
+# written twice.
 # Needs a docker login to dhi.io and ghcr.io, regctl, cosign, gh with GH_TOKEN,
 # GITHUB_REPOSITORY, and a checkout with the full history of mirror.json.
 set -euo pipefail
@@ -32,22 +33,18 @@ while read -r entry; do
   release="$image-$tag"
 
   current=$(ghcr_digest "$tag")
-  if [[ -n $current && $current != "$digest" ]]; then
+  if [[ -z $current ]]; then
+    echo "$dest:$tag: copying dhi.io/$image@$digest" >&2
+    regctl image copy --referrers --force-recursive "dhi.io/$image@$digest" "$dest:$tag"
+  elif [[ $current != "$digest" ]]; then
     echo "$dest:$tag is $current, but mirror.json says $digest" >&2
     exit 1
   fi
-  has_release=false
+
+  # The release is made last, after the signature on the copy checks out.
   if grep -qxF -- "$release" <<<"$releases"; then
-    has_release=true
-  fi
-  if [[ -n $current && $has_release == true ]]; then
     continue
   fi
-
-  # The release is made last, so a missing release means the copy may be
-  # unfinished. Copying again only adds what is missing.
-  echo "$dest:$tag: copying dhi.io/$image@$digest" >&2
-  regctl image copy --referrers --force-recursive "dhi.io/$image@$digest" "$dest:$tag"
   if [[ ! -f dhi.pub ]]; then
     curl -fsSL -o dhi.pub https://registry.scout.docker.com/keyring/dhi/latest.pub
   fi
@@ -55,20 +52,27 @@ while read -r entry; do
     "$dest@$digest" >/dev/null
   echo "$dest@$digest: DHI signature verified" >&2
 
-  if [[ $has_release == false ]]; then
-    # The release's git tag points at the commit that added this entry.
-    commit=$(git log --format=%H -S "$digest" -- mirror.json | tail -n 1)
-    if [[ -z $commit ]]; then
-      echo "no commit adds $digest to mirror.json" >&2
-      exit 1
+  # The release's git tag points at the commit that added this entry.
+  commits=$(git log --reverse --format=%H -- mirror.json)
+  commit=""
+  for c in $commits; do
+    found=$(git show "$c:mirror.json" |
+      jq --arg key "$key" --arg tag "$tag" '(.[$key] // []) | any(.tag == $tag)')
+    if [[ $found == true ]]; then
+      commit=$c
+      break
     fi
-    gh release create "$release" --repo "$GITHUB_REPOSITORY" --target "$commit" \
-      --title "$release" --notes "\
+  done
+  if [[ -z $commit ]]; then
+    echo "no commit adds $key $tag to mirror.json" >&2
+    exit 1
+  fi
+  gh release create "$release" --repo "$GITHUB_REPOSITORY" --target "$commit" \
+    --title "$release" --notes "\
 docker pull $dest:$tag
 docker pull $dest@$digest
 
 Copied from dhi.io/$image@$digest."
-  fi
 done <<<"$entries"
 
 last_digest=$(jq -r --arg key "$key" '.[$key][-1].digest' mirror.json)
