@@ -58,7 +58,8 @@ while read -r entry; do
   commit=""
   for c in $commits; do
     found=$(git show "$c:mirror.json" |
-      jq --arg key "$key" --arg tag "$tag" '(.[$key] // []) | any(.tag == $tag)')
+      jq --arg key "$key" --arg tag "$tag" --arg digest "$digest" \
+        '(.[$key] // []) | any(.tag == $tag and .digest == $digest)')
     if [[ $found == true ]]; then
       commit=$c
       break

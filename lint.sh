@@ -23,7 +23,8 @@ jq -se '
       and all(.[]; type == "string")
       and "\(.image):\(.prefix)" == $key
       and (.digest | test("^sha256:[0-9a-f]{64}$"))
-      and (.tag | ltrimstr($key | split(":")[1]) | test("^-[0-9]{8}(\\.[0-9]+)?$")))
+      and (.prefix as $p | .tag
+        | startswith($p) and (.[($p | length):] | test("^-[0-9]{8}(\\.[0-9]+)?$"))))
     and (map(.digest) | length == (unique | length))
     and (map(.tag) | length == (unique | length))))
 ' mirror.json >/dev/null || { echo "mirror.json: bad structure" >&2; exit 1; }
