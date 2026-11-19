@@ -1,3 +1,23 @@
-[
-  { "image": "postgres", "dhi_tag": "18-debian", "prefix": "18-debian" }
-]
+{
+  "images": [
+    "dhi.io/postgres:18",
+    "dhi.io/postgres:18-alpine",
+    "dhi.io/cert-manager-controller:1",
+    "dhi.io/cert-manager-webhook:1",
+    "dhi.io/cert-manager-cainjector:1",
+    "dhi.io/cert-manager-acmesolver:1",
+    "dhi.io/cert-manager-startupapicheck:1",
+    "dhi.io/cloudnative-pg:1",
+    "dhi.io/cloudnative-pg-plugin-barman-cloud:0",
+    "dhi.io/cloudnative-pg-plugin-barman-cloud-sidecar:0",
+    "dhi.io/kube-state-metrics:2",
+    "dhi.io/opentelemetry-collector:0-contrib"
+  ],
+  "charts": [
+    "dhi.io/cert-manager-chart",
+    "dhi.io/cloudnative-pg-chart",
+    "dhi.io/kube-state-metrics-chart",
+    "dhi.io/opentelemetry-collector-chart",
+    "ghcr.io/cloudnative-pg/charts/plugin-barman-cloud"
+  ]
+}
